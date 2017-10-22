@@ -21660,7 +21660,7 @@
  },
  "paths": {
   "./lint.whitelist": [
-   "05d60cf6c75b15a18cbd0b0526ea9edea7d933f9",
+   "28c20b33fcbd818a46005dcbf53473f8b8346c89",
    "support"
   ],
   "bluetooth/advertisingEvent/watchAdvertisements-succeeds.html": [
@@ -23276,11 +23276,11 @@
    "reftest"
   ],
   "css/box_shadow_blur_fixed.html": [
-   "011f60d0fe0c2faa9d9813f5916f04f0a7671870",
+   "8a00af0869a2c7b933ae288e086c4a705ef99116",
    "reftest"
   ],
   "css/box_shadow_blur_fixed_ref.html": [
-   "1da8590307d821e8dcd4a8997f6a7dbc5b36a105",
+   "512b6e498fad9033fb9301f192e7345da25252e8",
    "support"
   ],
   "css/box_shadow_blur_ref.html": [
@@ -28012,7 +28012,7 @@
    "testharness"
   ],
   "mozilla/htmlfontelement_size_attribute.html": [
-   "54fe6bbc1a7a35ceb14a3bf33f81ebed55beaf72",
+   "0747a4b45f19f7afbd3fa102b32d8db231dccadb",
    "testharness"
   ],
   "mozilla/htmlimageelement.html": [

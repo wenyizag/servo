@@ -56,7 +56,7 @@ use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use task_source::TaskSource;
 
 bitflags! {
-    #[derive(HeapSizeOf, JSTraceable)]
+    #[derive(JSTraceable, MallocSizeOf)]
     flags SandboxAllowance: u8 {
         const ALLOW_NOTHING = 0x00,
         const ALLOW_SAME_ORIGIN = 0x01,
@@ -223,7 +223,7 @@ impl HTMLIFrameElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes
+    /// <https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes>
     fn process_the_iframe_attributes(&self, mode: ProcessingMode) {
         // TODO: srcdoc
 
@@ -335,7 +335,7 @@ impl HTMLIFrameElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLIFrameElement> {
-        Node::reflect_node(box HTMLIFrameElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLIFrameElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLIFrameElementBinding::Wrap)
     }
@@ -571,7 +571,7 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     make_url_getter!(Src, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
-    make_url_setter!(SetSrc, "src");
+    make_setter!(SetSrc, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-sandbox
     fn Sandbox(&self) -> DomRoot<DOMTokenList> {
@@ -588,17 +588,13 @@ impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://html.spec.whatwg.org/multipage/#concept-bcc-content-document
     fn GetContentDocument(&self) -> Option<DomRoot<Document>> {
         // Step 1.
-        let pipeline_id = match self.pipeline_id.get() {
-            None => return None,
-            Some(pipeline_id) => pipeline_id,
-        };
+        let pipeline_id = self.pipeline_id.get()?;
+
         // Step 2-3.
         // Note that this lookup will fail if the document is dissimilar-origin,
         // so we should return None in that case.
-        let document = match ScriptThread::find_document(pipeline_id) {
-            None => return None,
-            Some(document) => document,
-        };
+        let document = ScriptThread::find_document(pipeline_id)?;
+
         // Step 4.
         let current = GlobalScope::current().expect("No current global object").as_window().Document();
         if !current.origin().same_origin_domain(document.origin()) {
@@ -761,7 +757,6 @@ impl VirtualMethods for HTMLIFrameElement {
 
     fn parse_plain_attribute(&self, name: &LocalName, value: DOMString) -> AttrValue {
         match name {
-            &local_name!("src") => AttrValue::from_url(document_from_node(self).base_url(), value.into()),
             &local_name!("sandbox") => AttrValue::from_serialized_tokenlist(value.into()),
             &local_name!("width") => AttrValue::from_dimension(value.into()),
             &local_name!("height") => AttrValue::from_dimension(value.into()),

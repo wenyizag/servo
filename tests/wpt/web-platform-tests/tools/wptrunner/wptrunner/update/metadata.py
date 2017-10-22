@@ -33,14 +33,15 @@ class UpdateExpected(Step):
                                                      ignore_existing=state.ignore_existing,
                                                      sync_root=sync_root,
                                                      property_order=state.property_order,
-                                                     boolean_properties=state.boolean_properties)
+                                                     boolean_properties=state.boolean_properties,
+                                                     stability=state.stability)
 
 
 class CreateMetadataPatch(Step):
     """Create a patch/commit for the metadata checkout"""
 
     def create(self, state):
-        if state.no_patch:
+        if not state.patch:
             return
 
         local_tree = state.local_tree

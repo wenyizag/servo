@@ -250,9 +250,7 @@ static ${name}: LonghandIdSet = LonghandIdSet {
 </%def>
 
 /// A set of longhand properties
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq)]
 pub struct LonghandIdSet {
     storage: [u32; (${len(data.longhands)} - 1 + 32) / 32]
 }
@@ -400,9 +398,7 @@ impl PropertyDeclarationIdSet {
 }
 
 /// An enum to represent a CSS Wide keyword.
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, ToCss)]
 pub enum CSSWideKeyword {
     /// The `initial` keyword.
     Initial,
@@ -465,9 +461,7 @@ bitflags! {
 }
 
 /// An identifier for a given longhand property.
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Eq, Hash, MallocSizeOf, PartialEq)]
 pub enum LonghandId {
     % for i, property in enumerate(data.longhands):
         /// ${property.name}
@@ -731,9 +725,7 @@ impl LonghandId {
 }
 
 /// An identifier for a given shorthand property.
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToCss)]
 pub enum ShorthandId {
     % for property in data.shorthands:
         /// ${property.name}
@@ -869,9 +861,12 @@ impl ShorthandId {
         }
     }
 
-    fn parse_into<'i, 't>(&self, declarations: &mut SourcePropertyDeclaration,
-                          context: &ParserContext, input: &mut Parser<'i, 't>)
-                          -> Result<(), ParseError<'i>> {
+    fn parse_into<'i, 't>(
+        &self,
+        declarations: &mut SourcePropertyDeclaration,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         match *self {
             % for shorthand in data.shorthands_except_all():
                 ShorthandId::${shorthand.camel_case} => {
@@ -1019,7 +1014,7 @@ impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
 /// An identifier for a given property declaration, which can be either a
 /// longhand or a custom property.
 #[derive(Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum PropertyDeclarationId<'a> {
     /// A longhand.
     Longhand(LonghandId),
@@ -1620,7 +1615,7 @@ impl PropertyDeclaration {
 
     /// The `context` parameter controls this:
     ///
-    /// https://drafts.csswg.org/css-animations/#keyframes
+    /// <https://drafts.csswg.org/css-animations/#keyframes>
     /// > The <declaration-list> inside of <keyframe-block> accepts any CSS property
     /// > except those defined in this specification,
     /// > but does accept the `animation-play-state` property and interprets it specially.
@@ -1628,10 +1623,13 @@ impl PropertyDeclaration {
     /// This will not actually parse Importance values, and will always set things
     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
     /// we only set them here so that we don't have to reallocate
-    pub fn parse_into<'i, 't>(declarations: &mut SourcePropertyDeclaration,
-                              id: PropertyId, name: CowRcStr<'i>,
-                              context: &ParserContext, input: &mut Parser<'i, 't>)
-                              -> Result<(), ParseError<'i>> {
+    pub fn parse_into<'i, 't>(
+        declarations: &mut SourcePropertyDeclaration,
+        id: PropertyId,
+        name: CowRcStr<'i>,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         assert!(declarations.is_empty());
         let start = input.state();
         match id {
@@ -1804,12 +1802,10 @@ pub mod style_structs {
 
     % for style_struct in data.active_style_structs():
         % if style_struct.name == "Font":
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, MallocSizeOf)]
         % else:
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
         % endif
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         /// The ${style_struct.name} style struct.
         pub struct ${style_struct.name} {
             % for longhand in style_struct.longhands:
@@ -2211,7 +2207,7 @@ impl ComputedValuesInner {
     pub fn has_moz_binding(&self) -> bool { false }
 
     /// Clone the visited style.  Used for inheriting parent styles in
-    /// StyleBuilder::for_inheritance.
+    /// StyleBuilder::for_derived_style.
     pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
         self.visited_style.clone()
     }
@@ -2371,7 +2367,7 @@ impl ComputedValuesInner {
            effects.mix_blend_mode != mix_blend_mode::T::normal
     }
 
-    /// https://drafts.csswg.org/css-transforms/#grouping-property-values
+    /// <https://drafts.csswg.org/css-transforms/#grouping-property-values>
     pub fn get_used_transform_style(&self) -> computed_values::transform_style::T {
         use computed_values::transform_style;
 
@@ -2842,6 +2838,18 @@ impl<'a> StyleBuilder<'a> {
         parent: &'a ComputedValues,
         pseudo: Option<<&'a PseudoElement>,
     ) -> Self {
+        // Rebuild the visited style from the parent, ensuring that it will also
+        // not have rules.  This matches the unvisited style that will be
+        // produced by this builder.  This assumes that the caller doesn't need
+        // to adjust or process visited style, so we can just build visited
+        // style here for simplicity.
+        let visited_style = parent.visited_style().map(|style| {
+            Self::for_inheritance(
+                device,
+                style,
+                pseudo,
+            ).build()
+        });
         // FIXME(emilio): This Some(parent) here is inconsistent with what we
         // usually do if `parent` is the default computed values, but that's
         // fine, and we want to eventually get rid of it.
@@ -2854,8 +2862,8 @@ impl<'a> StyleBuilder<'a> {
             /* rules = */ None,
             parent.custom_properties().cloned(),
             parent.writing_mode,
-            parent.flags,
-            parent.clone_visited_style()
+            parent.flags.inherited(),
+            visited_style,
         )
     }
 
@@ -3557,7 +3565,7 @@ pub fn adjust_border_width(style: &mut StyleBuilder) {
 
 /// An identifier for a given alias property.
 #[derive(Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum AliasId {
     % for i, property in enumerate(data.all_aliases()):
         /// ${property.name}

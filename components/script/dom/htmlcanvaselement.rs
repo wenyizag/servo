@@ -42,7 +42,7 @@ const DEFAULT_WIDTH: u32 = 300;
 const DEFAULT_HEIGHT: u32 = 150;
 
 #[must_root]
-#[derive(Clone, HeapSizeOf, JSTraceable)]
+#[derive(Clone, JSTraceable, MallocSizeOf)]
 pub enum CanvasContext {
     Context2d(Dom<CanvasRenderingContext2D>),
     WebGL(Dom<WebGLRenderingContext>),
@@ -68,7 +68,7 @@ impl HTMLCanvasElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLCanvasElement> {
-        Node::reflect_node(box HTMLCanvasElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLCanvasElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLCanvasElementBinding::Wrap)
     }
@@ -219,12 +219,7 @@ impl HTMLCanvasElement {
                 let msg = CanvasMsg::FromScript(FromScriptMsg::SendPixels(sender));
                 context.get_ipc_renderer().send(msg).unwrap();
 
-                match receiver.recv().unwrap() {
-                    Some(pixels) => pixels,
-                    None => {
-                        return None;
-                    }
-                }
+                receiver.recv().unwrap()?
             },
             Some(&CanvasContext::WebGL(_)) => {
                 // TODO: add a method in WebGLRenderingContext to get the pixels.

@@ -8,8 +8,8 @@ use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, RuleListParser, Parse
 use cssparser::{DeclarationListParser, DeclarationParser, parse_one_rule, SourceLocation};
 use error_reporting::{NullReporter, ContextualParseError, ParseErrorReporter};
 use parser::{ParserContext, ParserErrorContext};
-use properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId, PropertyParserContext};
-use properties::{PropertyDeclarationId, LonghandId, SourcePropertyDeclaration};
+use properties::{DeclarationSource, Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId};
+use properties::{PropertyDeclarationId, PropertyParserContext, LonghandId, SourcePropertyDeclaration};
 use properties::LonghandIdSet;
 use properties::longhands::transition_timing_function::single_value::SpecifiedValue as SpecifiedTimingFunction;
 use servo_arc::Arc;
@@ -58,7 +58,7 @@ impl KeyframesRule {
     /// If the selector is not valid, or no keyframe is found, returns None.
     ///
     /// Related spec:
-    /// https://drafts.csswg.org/css-animations-1/#interface-csskeyframesrule-findrule
+    /// <https://drafts.csswg.org/css-animations-1/#interface-csskeyframesrule-findrule>
     pub fn find_rule(&self, guard: &SharedRwLockReadGuard, selector: &str) -> Option<usize> {
         let mut input = ParserInput::new(selector);
         if let Ok(selector) = Parser::new(&mut input).parse_entirely(KeyframeSelector::parse) {
@@ -96,9 +96,7 @@ impl DeepCloneWithLock for KeyframesRule {
 
 /// A number from 0 to 1, indicating the percentage of the animation when this
 /// keyframe should run.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd)]
 pub struct KeyframePercentage(pub f32);
 
 impl ::std::cmp::Ord for KeyframePercentage {
@@ -260,16 +258,14 @@ impl DeepCloneWithLock for Keyframe {
 /// declarations to apply.
 ///
 /// TODO: Find a better name for this?
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub enum KeyframesStepValue {
     /// A step formed by a declaration block specified by the CSS.
     Declarations {
         /// The declaration block per se.
         #[cfg_attr(feature = "gecko",
                    ignore_malloc_size_of = "XXX: Primary ref, measure if DMD says it's worthwhile")]
-        #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
+        #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
         block: Arc<Locked<PropertyDeclarationBlock>>
     },
     /// A synthetic step computed from the current computed values at the time
@@ -278,9 +274,7 @@ pub enum KeyframesStepValue {
 }
 
 /// A single step from a keyframe animation.
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub struct KeyframesStep {
     /// The percentage of the animation duration when this step starts.
     pub start_percentage: KeyframePercentage,
@@ -350,9 +344,7 @@ impl KeyframesStep {
 /// of keyframes, in order.
 ///
 /// It only takes into account animable properties.
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub struct KeyframesAnimation {
     /// The difference steps of the animation.
     pub steps: Vec<KeyframesStep>,
@@ -549,7 +541,11 @@ impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListPars
         while let Some(declaration) = iter.next() {
             match declaration {
                 Ok(()) => {
-                    block.extend(iter.parser.declarations.drain(), Importance::Normal);
+                    block.extend(
+                        iter.parser.declarations.drain(),
+                        Importance::Normal,
+                        DeclarationSource::Parsing,
+                    );
                 }
                 Err((error, slice)) => {
                     iter.parser.declarations.clear();

@@ -89,24 +89,24 @@ use script_layout_interface::message::ReflowGoal;
 use script_thread::ScriptThread;
 use selectors::Element as SelectorsElement;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint, CaseSensitivity};
-use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext, MatchingMode};
+use selectors::matching::{ElementSelectorFlags, MatchingContext, RelevantLinkStatus};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
-use selectors::matching::{RelevantLinkStatus, matches_selector_list};
 use selectors::sink::Push;
 use servo_arc::Arc;
 use servo_atoms::Atom;
 use std::ascii::AsciiExt;
 use std::borrow::Cow;
 use std::cell::{Cell, Ref};
-use std::convert::TryFrom;
 use std::default::Default;
 use std::fmt;
 use std::mem;
 use std::rc::Rc;
+use std::str::FromStr;
 use style::CaseSensitivityExt;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use style::context::QuirksMode;
+use style::dom_apis;
 use style::element_state::*;
 use style::invalidation::element::restyle_hints::RESTYLE_SELF;
 use style::properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock, parse_style_attribute};
@@ -120,6 +120,11 @@ use style::values::{CSSFloat, Either};
 use style::values::{specified, computed};
 use stylesheet_loader::StylesheetOwner;
 use task::TaskOnce;
+use xml5ever::serialize as xmlSerialize;
+use xml5ever::serialize::SerializeOpts as XmlSerializeOpts;
+use xml5ever::serialize::TraversalScope as XmlTraversalScope;
+use xml5ever::serialize::TraversalScope::ChildrenOnly as XmlChildrenOnly;
+use xml5ever::serialize::TraversalScope::IncludeNode as XmlIncludeNode;
 
 // TODO: Update focus state when the top-level browsing context gains or loses system focus,
 // and when the element enters or leaves a browsing context container.
@@ -135,7 +140,7 @@ pub struct Element {
     attrs: DomRefCell<Vec<Dom<Attr>>>,
     id_attribute: DomRefCell<Option<Atom>>,
     is: DomRefCell<Option<LocalName>>,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     style_attribute: DomRefCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
     attr_list: MutNullableDom<NamedNodeMap>,
     class_list: MutNullableDom<DOMTokenList>,
@@ -144,14 +149,14 @@ pub struct Element {
     /// operations may require restyling this element or its descendants. The
     /// flags are not atomic, so the style system takes care of only set them
     /// when it has exclusive access to the element.
-    #[ignore_heap_size_of = "bitflags defined in rust-selectors"]
+    #[ignore_malloc_size_of = "bitflags defined in rust-selectors"]
     selector_flags: Cell<ElementSelectorFlags>,
-    /// https://html.spec.whatwg.org/multipage/#custom-element-reaction-queue
+    /// <https://html.spec.whatwg.org/multipage/#custom-element-reaction-queue>
     custom_element_reaction_queue: DomRefCell<Vec<CustomElementReaction>>,
-    /// https://dom.spec.whatwg.org/#concept-element-custom-element-definition
-    #[ignore_heap_size_of = "Rc"]
+    /// <https://dom.spec.whatwg.org/#concept-element-custom-element-definition>
+    #[ignore_malloc_size_of = "Rc"]
     custom_element_definition: DomRefCell<Option<Rc<CustomElementDefinition>>>,
-    /// https://dom.spec.whatwg.org/#concept-element-custom-element-state
+    /// <https://dom.spec.whatwg.org/#concept-element-custom-element-state>
     custom_element_state: Cell<CustomElementState>,
 }
 
@@ -171,7 +176,7 @@ impl fmt::Debug for DomRoot<Element> {
     }
 }
 
-#[derive(HeapSizeOf, PartialEq)]
+#[derive(MallocSizeOf, PartialEq)]
 pub enum ElementCreator {
     ParserCreated(u64),
     ScriptCreated,
@@ -182,8 +187,8 @@ pub enum CustomElementCreationMode {
     Asynchronous,
 }
 
-/// https://dom.spec.whatwg.org/#concept-element-custom-element-state
-#[derive(Clone, Copy, Eq, HeapSizeOf, JSTraceable, PartialEq)]
+/// <https://dom.spec.whatwg.org/#concept-element-custom-element-state>
+#[derive(Clone, Copy, Eq, JSTraceable, MallocSizeOf, PartialEq)]
 pub enum CustomElementState {
     Undefined,
     Failed,
@@ -213,10 +218,10 @@ pub enum AdjacentPosition {
     BeforeEnd,
 }
 
-impl<'a> TryFrom<&'a str> for AdjacentPosition {
-    type Error = Error;
+impl FromStr for AdjacentPosition {
+    type Err = Error;
 
-    fn try_from(position: &'a str) -> Result<AdjacentPosition, Self::Error> {
+    fn from_str(position: &str) -> Result<Self, Self::Err> {
         match_ignore_ascii_case! { &*position,
             "beforebegin" => Ok(AdjacentPosition::BeforeBegin),
             "afterbegin"  => Ok(AdjacentPosition::AfterBegin),
@@ -276,7 +281,7 @@ impl Element {
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<Element> {
         Node::reflect_node(
-            box Element::new_inherited(local_name, namespace, prefix, document),
+            Box::new(Element::new_inherited(local_name, namespace, prefix, document)),
             document,
             ElementBinding::Wrap)
     }
@@ -1004,6 +1009,19 @@ impl Element {
         }
     }
 
+    pub fn xmlSerialize(&self, traversal_scope: XmlTraversalScope) -> Fallible<DOMString> {
+        let mut writer = vec![];
+        match xmlSerialize::serialize(&mut writer,
+                        &self.upcast::<Node>(),
+                        XmlSerializeOpts {
+                            traversal_scope: traversal_scope,
+                            ..Default::default()
+                        }) {
+            Ok(()) => Ok(DOMString::from(String::from_utf8(writer).unwrap())),
+            Err(_) => panic!("Cannot serialize element"),
+        }
+    }
+
     pub fn root_element(&self) -> DomRoot<Element> {
         if self.node.is_in_doc() {
             self.upcast::<Node>()
@@ -1022,24 +1040,20 @@ impl Element {
     // https://dom.spec.whatwg.org/#locate-a-namespace-prefix
     pub fn lookup_prefix(&self, namespace: Namespace) -> Option<DOMString> {
         for node in self.upcast::<Node>().inclusive_ancestors() {
-            match node.downcast::<Element>() {
-                Some(element) => {
-                    // Step 1.
-                    if *element.namespace() == namespace {
-                        if let Some(prefix) = element.GetPrefix() {
-                            return Some(prefix);
-                        }
-                    }
+            let element = node.downcast::<Element>()?;
+            // Step 1.
+            if *element.namespace() == namespace {
+                if let Some(prefix) = element.GetPrefix() {
+                    return Some(prefix);
+                }
+            }
 
-                    // Step 2.
-                    for attr in element.attrs.borrow().iter() {
-                        if attr.prefix() == Some(&namespace_prefix!("xmlns")) &&
-                           **attr.value() == *namespace {
-                            return Some(attr.LocalName());
-                        }
-                    }
-                },
-                None => return None,
+            // Step 2.
+            for attr in element.attrs.borrow().iter() {
+                if attr.prefix() == Some(&namespace_prefix!("xmlns")) &&
+                   **attr.value() == *namespace {
+                    return Some(attr.LocalName());
+                }
             }
         }
         None
@@ -1306,26 +1320,13 @@ impl Element {
             Some(attr) => attr,
             None => return DOMString::new(),
         };
-        let value = attr.value();
-        match *value {
-            AttrValue::Url(ref value, _) => {
-                // XXXManishearth this doesn't handle `javascript:` urls properly
-                let base = document_from_node(self).base_url();
-                let value = base.join(value)
-                    .map(|parsed| parsed.into_string())
-                    .unwrap_or_else(|_| value.clone());
-                DOMString::from(value)
-            },
-            _ => panic!("attribute value should be AttrValue::Url(..)"),
-        }
-    }
-
-    pub fn set_url_attribute(&self, local_name: &LocalName, value: DOMString) {
-        let value = AttrValue::from_url(
-            document_from_node(self).base_url(),
-            value.into(),
-        );
-        self.set_attribute(local_name, value);
+        let value = &**attr.value();
+        // XXXManishearth this doesn't handle `javascript:` urls properly
+        let base = document_from_node(self).base_url();
+        let value = base.join(value)
+            .map(|parsed| parsed.into_string())
+            .unwrap_or_else(|_| value.to_owned());
+        DOMString::from(value)
     }
 
     pub fn get_string_attribute(&self, local_name: &LocalName) -> DOMString {
@@ -1334,6 +1335,7 @@ impl Element {
             None => DOMString::new(),
         }
     }
+
     pub fn set_string_attribute(&self, local_name: &LocalName, value: DOMString) {
         assert!(*local_name == local_name.to_ascii_lowercase());
         self.set_attribute(local_name, AttrValue::String(value.into()));
@@ -2057,16 +2059,19 @@ impl ElementMethods for Element {
         self.upcast::<Node>().client_rect().size.height
     }
 
-    /// https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML
+    /// <https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML>
     fn GetInnerHTML(&self) -> Fallible<DOMString> {
-        // XXX TODO: XML case
         let qname = QualName::new(self.prefix().clone(),
                                   self.namespace().clone(),
                                   self.local_name().clone());
-        self.serialize(ChildrenOnly(Some(qname)))
+        if document_from_node(self).is_html_document() {
+            return self.serialize(ChildrenOnly(Some(qname)));
+        } else {
+            return self.xmlSerialize(XmlChildrenOnly(Some(qname)));
+        }
     }
 
-    /// https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML
+    /// <https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML>
     fn SetInnerHTML(&self, value: DOMString) -> ErrorResult {
         // Step 1.
         let frag = self.parse_fragment(value)?;
@@ -2083,7 +2088,11 @@ impl ElementMethods for Element {
 
     // https://dvcs.w3.org/hg/innerhtml/raw-file/tip/index.html#widl-Element-outerHTML
     fn GetOuterHTML(&self) -> Fallible<DOMString> {
-        self.serialize(IncludeNode)
+        if document_from_node(self).is_html_document() {
+            return self.serialize(IncludeNode);
+        } else {
+            return self.xmlSerialize(XmlIncludeNode);
+        }
     }
 
     // https://w3c.github.io/DOM-Parsing/#dom-element-outerhtml
@@ -2197,18 +2206,16 @@ impl ElementMethods for Element {
 
     // https://dom.spec.whatwg.org/#dom-element-matches
     fn Matches(&self, selectors: DOMString) -> Fallible<bool> {
-        match SelectorParser::parse_author_origin_no_namespace(&selectors) {
-            Err(_) => Err(Error::Syntax),
-            Ok(selectors) => {
-                let quirks_mode = document_from_node(self).quirks_mode();
-                let root = DomRoot::from_ref(self);
-                // FIXME(bholley): Consider an nth-index cache here.
-                let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
-                                                   quirks_mode);
-                ctx.scope_element = Some(root.opaque());
-                Ok(matches_selector_list(&selectors, &root, &mut ctx))
-            }
-        }
+        let selectors =
+            match SelectorParser::parse_author_origin_no_namespace(&selectors) {
+                Err(_) => return Err(Error::Syntax),
+                Ok(selectors) => selectors,
+            };
+
+        let quirks_mode = document_from_node(self).quirks_mode();
+        let element = DomRoot::from_ref(self);
+
+        Ok(dom_apis::element_matches(&element, &selectors, quirks_mode))
     }
 
     // https://dom.spec.whatwg.org/#dom-element-webkitmatchesselector
@@ -2218,32 +2225,24 @@ impl ElementMethods for Element {
 
     // https://dom.spec.whatwg.org/#dom-element-closest
     fn Closest(&self, selectors: DOMString) -> Fallible<Option<DomRoot<Element>>> {
-        match SelectorParser::parse_author_origin_no_namespace(&selectors) {
-            Err(_) => Err(Error::Syntax),
-            Ok(selectors) => {
-                let self_root = DomRoot::from_ref(self);
-                let root = self.upcast::<Node>();
-                for element in root.inclusive_ancestors() {
-                    if let Some(element) = DomRoot::downcast::<Element>(element) {
-                        let quirks_mode = document_from_node(self).quirks_mode();
-                        // FIXME(bholley): Consider an nth-index cache here.
-                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
-                                                           quirks_mode);
-                        ctx.scope_element = Some(self_root.opaque());
-                        if matches_selector_list(&selectors, &element, &mut ctx) {
-                            return Ok(Some(element));
-                        }
-                    }
-                }
-                Ok(None)
-            }
-        }
+        let selectors =
+            match SelectorParser::parse_author_origin_no_namespace(&selectors) {
+                Err(_) => return Err(Error::Syntax),
+                Ok(selectors) => selectors,
+            };
+
+        let quirks_mode = document_from_node(self).quirks_mode();
+        Ok(dom_apis::element_closest(
+            DomRoot::from_ref(self),
+            &selectors,
+            quirks_mode,
+        ))
     }
 
     // https://dom.spec.whatwg.org/#dom-element-insertadjacentelement
     fn InsertAdjacentElement(&self, where_: DOMString, element: &Element)
                              -> Fallible<Option<DomRoot<Element>>> {
-        let where_ = AdjacentPosition::try_from(&*where_)?;
+        let where_ = where_.parse::<AdjacentPosition>()?;
         let inserted_node = self.insert_adjacent(where_, element.upcast())?;
         Ok(inserted_node.map(|node| DomRoot::downcast(node).unwrap()))
     }
@@ -2255,7 +2254,7 @@ impl ElementMethods for Element {
         let text = Text::new(data, &document_from_node(self));
 
         // Step 2.
-        let where_ = AdjacentPosition::try_from(&*where_)?;
+        let where_ = where_.parse::<AdjacentPosition>()?;
         self.insert_adjacent(where_, text.upcast()).map(|_| ())
     }
 
@@ -2263,7 +2262,7 @@ impl ElementMethods for Element {
     fn InsertAdjacentHTML(&self, position: DOMString, text: DOMString)
                           -> ErrorResult {
         // Step 1.
-        let position = AdjacentPosition::try_from(&*position)?;
+        let position = position.parse::<AdjacentPosition>()?;
 
         let context = match position {
             AdjacentPosition::BeforeBegin | AdjacentPosition::AfterEnd => {
@@ -2525,11 +2524,11 @@ impl<'a> SelectorsElement for DomRoot<Element> {
         self.upcast::<Node>().GetParentElement()
     }
 
-    fn match_pseudo_element(&self,
-                            _pseudo: &PseudoElement,
-                            _context: &mut MatchingContext)
-                            -> bool
-    {
+    fn match_pseudo_element(
+        &self,
+        _pseudo: &PseudoElement,
+        _context: &mut MatchingContext<Self::Impl>,
+    ) -> bool {
         false
     }
 
@@ -2591,13 +2590,15 @@ impl<'a> SelectorsElement for DomRoot<Element> {
         self.namespace()
     }
 
-    fn match_non_ts_pseudo_class<F>(&self,
-                                    pseudo_class: &NonTSPseudoClass,
-                                    _: &mut LocalMatchingContext<Self::Impl>,
-                                    _: &RelevantLinkStatus,
-                                    _: &mut F)
-                                    -> bool
-        where F: FnMut(&Self, ElementSelectorFlags),
+    fn match_non_ts_pseudo_class<F>(
+        &self,
+        pseudo_class: &NonTSPseudoClass,
+        _: &mut MatchingContext<Self::Impl>,
+        _: &RelevantLinkStatus,
+        _: &mut F,
+    ) -> bool
+    where
+        F: FnMut(&Self, ElementSelectorFlags),
     {
         match *pseudo_class {
             // https://github.com/servo/servo/issues/8718
@@ -2776,7 +2777,7 @@ impl Element {
 
     /// Please call this method *only* for real click events
     ///
-    /// https://html.spec.whatwg.org/multipage/#run-authentic-click-activation-steps
+    /// <https://html.spec.whatwg.org/multipage/#run-authentic-click-activation-steps>
     ///
     /// Use an element's synthetic click activation (or handle_event) for any script-triggered clicks.
     /// If the spec says otherwise, check with Manishearth first
@@ -2856,7 +2857,7 @@ impl Element {
         self.state.get().contains(IN_ACTIVE_STATE)
     }
 
-    /// https://html.spec.whatwg.org/multipage/#concept-selector-active
+    /// <https://html.spec.whatwg.org/multipage/#concept-selector-active>
     pub fn set_active_state(&self, value: bool) {
         self.set_state(IN_ACTIVE_STATE, value);
 
@@ -2933,7 +2934,7 @@ impl Element {
         self.set_state(IN_FULLSCREEN_STATE, value)
     }
 
-    /// https://dom.spec.whatwg.org/#connected
+    /// <https://dom.spec.whatwg.org/#connected>
     pub fn is_connected(&self) -> bool {
         let node = self.upcast::<Node>();
         let root = node.GetRootNode();
@@ -2995,11 +2996,11 @@ impl Element {
 #[derive(Clone, Copy)]
 pub enum AttributeMutation<'a> {
     /// The attribute is set, keep track of old value.
-    /// https://dom.spec.whatwg.org/#attribute-is-set
+    /// <https://dom.spec.whatwg.org/#attribute-is-set>
     Set(Option<&'a AttrValue>),
 
     /// The attribute is removed.
-    /// https://dom.spec.whatwg.org/#attribute-is-removed
+    /// <https://dom.spec.whatwg.org/#attribute-is-removed>
     Removed,
 }
 
@@ -3022,7 +3023,7 @@ impl<'a> AttributeMutation<'a> {
 /// A holder for an element's "tag name", which will be lazily
 /// resolved and cached. Should be reset when the document
 /// owner changes.
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 struct TagName {
     ptr: DomRefCell<Option<LocalName>>,
 }
@@ -3062,11 +3063,11 @@ pub struct ElementPerformFullscreenEnter {
 
 impl ElementPerformFullscreenEnter {
     pub fn new(element: Trusted<Element>, promise: TrustedPromise, error: bool) -> Box<ElementPerformFullscreenEnter> {
-        box ElementPerformFullscreenEnter {
+        Box::new(ElementPerformFullscreenEnter {
             element: element,
             promise: promise,
             error: error,
-        }
+        })
     }
 }
 
@@ -3105,10 +3106,10 @@ pub struct ElementPerformFullscreenExit {
 
 impl ElementPerformFullscreenExit {
     pub fn new(element: Trusted<Element>, promise: TrustedPromise) -> Box<ElementPerformFullscreenExit> {
-        box ElementPerformFullscreenExit {
+        Box::new(ElementPerformFullscreenExit {
             element: element,
             promise: promise,
-        }
+        })
     }
 }
 

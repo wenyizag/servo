@@ -29,33 +29,6 @@ function assert_frames_equal(a, b, name) {
 }
 
 // ------------------------------
-//  Easing values
-// ------------------------------
-
-// [specified easing value, expected easing value]
-var gEasingValueTests = [
-  ["linear", "linear"],
-  ["ease-in-out", "ease-in-out"],
-  ["Ease\\2d in-out", "ease-in-out"],
-  ["ease /**/", "ease"],
-];
-
-var gInvalidEasingInKeyframeSequenceTests = [
-  { desc:   "a blank easing",
-    input:  [{ easing: "" }] },
-  { desc:   "an unrecognized easing",
-    input:  [{ easing: "unrecognized" }] },
-  { desc:   "an 'initial' easing",
-    input:  [{ easing: "initial" }] },
-  { desc:   "an 'inherit' easing",
-    input:  [{ easing: "inherit" }] },
-  { desc:   "a variable easing",
-    input:  [{ easing: "var(--x)" }] },
-  { desc:   "a multi-value easing",
-    input:  [{ easing: "ease-in-out, ease-out" }] }
-];
-
-// ------------------------------
 //  Composite values
 // ------------------------------
 
@@ -128,7 +101,7 @@ var gPropertyIndexedKeyframesTests = [
              { offset: null, computedOffset: 0.25, easing: "linear",
                left: "20px", top: "25px" },
              { offset: null, computedOffset: 0.50, easing: "linear",
-               left: "30px", top: "invalid" },
+               left: "30px" },
              { offset: null, computedOffset: 0.75, easing: "linear",
                left: "40px", top: "45px" },
              { offset: null, computedOffset: 1.00, easing: "linear",
@@ -166,8 +139,7 @@ var gPropertyIndexedKeyframesTests = [
   { desc:   "a one property two value property-indexed keyframes specification"
             + " where the first value is invalid",
     input:  { left: ["invalid", "10px"] },
-    output: [{ offset: null, computedOffset: 0, easing: "linear",
-               left: "invalid" },
+    output: [{ offset: null, computedOffset: 0, easing: "linear" },
              { offset: null, computedOffset: 1, easing: "linear",
                left: "10px" }] },
   { desc:   "a one property two value property-indexed keyframes specification"
@@ -175,8 +147,7 @@ var gPropertyIndexedKeyframesTests = [
     input:  { left: ["10px", "invalid"] },
     output: [{ offset: null, computedOffset: 0, easing: "linear",
                left: "10px" },
-             { offset: null, computedOffset: 1, easing: "linear",
-               left: "invalid" }] },
+             { offset: null, computedOffset: 1, easing: "linear" }] },
 ];
 
 var gKeyframeSequenceTests = [

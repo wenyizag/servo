@@ -15,6 +15,7 @@ use gecko_bindings::structs::mozilla::css::ImageValue;
 use gecko_bindings::structs::mozilla::css::URLValue;
 use gecko_bindings::structs::mozilla::css::URLValueData;
 use gecko_bindings::structs::mozilla::AnonymousCounterStyle;
+use gecko_bindings::structs::mozilla::AtomArray;
 use gecko_bindings::structs::mozilla::MallocSizeOf;
 use gecko_bindings::structs::mozilla::OriginFlags;
 use gecko_bindings::structs::mozilla::UniquePtr;
@@ -1922,6 +1923,11 @@ extern "C" {
                                         len: usize);
 }
 extern "C" {
+    pub fn Gecko_AnnotateCrashReport(key_str: *const ::std::os::raw::c_char,
+                                     value_str:
+                                         *const ::std::os::raw::c_char);
+}
+extern "C" {
     pub fn Servo_Element_ClearData(node: RawGeckoElementBorrowed);
 }
 extern "C" {
@@ -2117,6 +2123,11 @@ extern "C" {
     pub fn Servo_SelectorList_Matches(arg1: RawGeckoElementBorrowed,
                                       arg2: RawServoSelectorListBorrowed)
      -> bool;
+}
+extern "C" {
+    pub fn Servo_SelectorList_Closest(arg1: RawGeckoElementBorrowed,
+                                      arg2: RawServoSelectorListBorrowed)
+     -> *const RawGeckoElement;
 }
 extern "C" {
     pub fn Servo_StyleSet_AddSizeOfExcludingThis(malloc_size_of: MallocSizeOf,
@@ -2722,7 +2733,7 @@ extern "C" {
     pub fn Servo_DeclarationBlock_RemovePropertyById(declarations:
                                                          RawServoDeclarationBlockBorrowed,
                                                      property:
-                                                         nsCSSPropertyID);
+                                                         nsCSSPropertyID) -> bool;
 }
 extern "C" {
     pub fn Servo_DeclarationBlock_HasCSSWideKeyword(declarations:
@@ -2927,16 +2938,25 @@ extern "C" {
      -> ServoStyleContextStrong;
 }
 extern "C" {
-    pub fn Servo_ResolveStyleAllowStale(element: RawGeckoElementBorrowed)
-     -> ServoStyleContextStrong;
-}
-extern "C" {
     pub fn Servo_ResolvePseudoStyle(element: RawGeckoElementBorrowed,
                                     pseudo_type: CSSPseudoElementType,
                                     is_probe: bool,
                                     inherited_style:
                                         ServoStyleContextBorrowedOrNull,
                                     set: RawServoStyleSetBorrowed)
+     -> ServoStyleContextStrong;
+}
+extern "C" {
+    pub fn Servo_ComputedValues_ResolveXULTreePseudoStyle(element:
+                                                              RawGeckoElementBorrowed,
+                                                          pseudo_tag:
+                                                              *mut nsAtom,
+                                                          inherited_style:
+                                                              ServoStyleContextBorrowed,
+                                                          input_word:
+                                                              *const AtomArray,
+                                                          set:
+                                                              RawServoStyleSetBorrowed)
      -> ServoStyleContextStrong;
 }
 extern "C" {
@@ -2996,6 +3016,19 @@ extern "C" {
                                                               *const ServoElementSnapshotTable,
                                                           pseudo_type:
                                                               CSSPseudoElementType)
+     -> ServoStyleContextStrong;
+}
+extern "C" {
+    pub fn Servo_StyleSet_GetComputedValuesByAddingAnimation(set:
+                                                                 RawServoStyleSetBorrowed,
+                                                             element:
+                                                                 RawGeckoElementBorrowed,
+                                                             existing_style:
+                                                                 ServoStyleContextBorrowed,
+                                                             snapshots:
+                                                                 *const ServoElementSnapshotTable,
+                                                             animation:
+                                                                 RawServoAnimationValueBorrowed)
      -> ServoStyleContextStrong;
 }
 extern "C" {

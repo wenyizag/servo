@@ -5,6 +5,7 @@
 use attr::CaseSensitivity;
 use bloom::BloomFilter;
 use nth_index_cache::NthIndexCache;
+use parser::SelectorImpl;
 use tree::OpaqueElement;
 
 /// What kind of selector matching mode we should use.
@@ -74,7 +75,10 @@ impl QuirksMode {
 /// Data associated with the matching process for a element.  This context is
 /// used across many selectors for an element, so it's not appropriate for
 /// transient data that applies to only a single selector.
-pub struct MatchingContext<'a> {
+pub struct MatchingContext<'a, Impl>
+where
+    Impl: SelectorImpl,
+{
     /// Input with the matching mode we should use when matching selectors.
     pub matching_mode: MatchingMode,
     /// Input with the bloom filter used to fast-reject selectors.
@@ -102,11 +106,22 @@ pub struct MatchingContext<'a> {
     /// See https://drafts.csswg.org/selectors-4/#scope-pseudo
     pub scope_element: Option<OpaqueElement>,
 
+    /// The current nesting level of selectors that we're matching.
+    pub nesting_level: usize,
+
+    /// An optional hook function for checking whether a pseudo-element
+    /// should match when matching_mode is ForStatelessPseudoElement.
+    pub pseudo_element_matching_fn: Option<&'a Fn(&Impl::PseudoElement) -> bool>,
+
     quirks_mode: QuirksMode,
     classes_and_ids_case_sensitivity: CaseSensitivity,
+    _impl: ::std::marker::PhantomData<Impl>,
 }
 
-impl<'a> MatchingContext<'a> {
+impl<'a, Impl> MatchingContext<'a, Impl>
+where
+    Impl: SelectorImpl,
+{
     /// Constructs a new `MatchingContext`.
     pub fn new(
         matching_mode: MatchingMode,
@@ -140,6 +155,9 @@ impl<'a> MatchingContext<'a> {
             relevant_link_found: false,
             classes_and_ids_case_sensitivity: quirks_mode.classes_and_ids_case_sensitivity(),
             scope_element: None,
+            nesting_level: 0,
+            pseudo_element_matching_fn: None,
+            _impl: ::std::marker::PhantomData,
         }
     }
 

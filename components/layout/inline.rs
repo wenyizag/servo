@@ -384,10 +384,7 @@ impl LineBreaker {
                                  -> Option<Fragment>
         where I: Iterator<Item=Fragment>,
     {
-        let mut result = match self.next_fragment(old_fragment_iter) {
-            None => return None,
-            Some(fragment) => fragment,
-        };
+        let mut result = self.next_fragment(old_fragment_iter)?;
 
         loop {
             let candidate = match self.next_fragment(old_fragment_iter) {
@@ -861,8 +858,12 @@ impl InlineFragments {
     }
 }
 
+#[allow(unsafe_code)]
+unsafe impl ::flow::HasBaseFlow for InlineFlow {}
+
 /// Flows for inline layout.
 #[derive(Serialize)]
+#[repr(C)]
 pub struct InlineFlow {
     /// Data common to all flows.
     pub base: BaseFlow,
